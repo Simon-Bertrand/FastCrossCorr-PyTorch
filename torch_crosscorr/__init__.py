@@ -142,11 +142,11 @@ got {statistic}")
                 )
                 .index_select(
                     -2,
-                    torch.arange(padHt, padHt + imCentered.size(-2)),
+                    torch.arange(padHt, padHt + imCentered.size(-2), device=imCentered.device),
                 )
                 .index_select(
                     -1,
-                    torch.arange(padWl, padWl + imCentered.size(-1)),
+                    torch.arange(padWl, padWl + imCentered.size(-1), device=imCentered.device),
                 )
             )
 
@@ -220,8 +220,8 @@ got {method}")
         iiSlice = slice(1 + padHt, 1 + cache.size(-2) - padHb - 1)
         jjSlice = slice(1 + padWl, 1 + cache.size(-1) - padWr - 1)
         ii, jj = torch.meshgrid(
-            torch.arange(iiSlice.start, iiSlice.stop),
-            torch.arange(jjSlice.start, jjSlice.stop),
+            torch.arange(iiSlice.start, iiSlice.stop, device=im.device),
+            torch.arange(jjSlice.start, jjSlice.stop, device=im.device),
             indexing="ij",
         )
 
