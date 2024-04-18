@@ -8,7 +8,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
     """
     This class represents a module for performing fast normalized
     cross-correlation.
-    The input image must be a real tensor of shape (B, C, H, W) and the 
+    The input image must be a real tensor of shape (B, C, H, W) and the
     template must be a real tensor of shape (B, C, h, w).
 
     Args:
@@ -25,7 +25,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         ValueError: If the method is not "fft", "spatial", or "naive".
 
     Methods:
-        findArgmax(x): Finds the indices of the maximum values along the last 
+        findArgmax(x): Finds the indices of the maximum values along the last
             dimension of the input tensor.
         forward(im, template): Performs the forward pass of the module.
 
@@ -38,8 +38,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
     """
 
     def __init__(
-        self, statistic: Literal["corr", "ncorr"],
-        method: Literal["fft", "spatial", "naive"]
+        self, statistic: Literal["corr", "ncorr"], method: Literal["fft", "spatial", "naive"]
     ):
         super().__init__()
         self.crossCorrelation = self._chooseMethod(method)
@@ -53,13 +52,15 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
             case "ncorr":
                 self.normalize = True
             case _:
-                raise ValueError(f"Statistic must be 'corr' or 'ncorr',\
-got {statistic}")
+                raise ValueError(
+                    f"Statistic must be 'corr' or 'ncorr',\
+got {statistic}"
+                )
 
     @staticmethod
     def findArgmax(x):
         """
-        Finds the indices of the maximum values along the last dimension of 
+        Finds the indices of the maximum values along the last dimension of
         the input tensor.
 
         Args:
@@ -71,7 +72,7 @@ got {statistic}")
         aMax = x.flatten(-2, -1).argmax(dim=-1)
         return torch.stack([aMax // x.size(-1), aMax % x.size(-1)])
 
-    @lru_cache
+    @lru_cache(maxsize=2)
     def _nextFastLen(self, size):
         """
         Computes the next fast length for FFT-based method.
@@ -86,8 +87,8 @@ got {statistic}")
         while True:
             remaining = next_size
             for n in (2, 3, 5):
-                while remaining % n == 0:
-                    remaining //= n
+                while (euclDiv := divmod(remaining, n))[1] == 0:
+                    remaining = euclDiv[0]
             if remaining == 1:
                 return next_size
             next_size += 1
@@ -107,12 +108,13 @@ got {statistic}")
 
     def _chooseMethod(self, method):
         """
-        Chooses the appropriate method for computing the cross-correlation 
+        Chooses the appropriate method for computing the cross-correlation
         based on the given method argument.
 
         Returns:
             function: The chosen method for computing the cross-correlation.
         """
+
         # FFT METHOD
         def crossCorrFFT(imCentered, template, padWl, padWr, padHt, padHb):
             # We flip the template because we want to cross correlate
@@ -127,18 +129,12 @@ got {statistic}")
                         imCentered,
                         s=(
                             padded_shape := (
-                                self._nextFastLen(
-                                    imCentered.size(-2) + template.size(-2) - 1
-                                ),
-                                self._nextFastLen(
-                                    imCentered.size(-1) + template.size(-1) - 1
-                                ),
+                                self._nextFastLen(imCentered.size(-2) + template.size(-2) - 1),
+                                self._nextFastLen(imCentered.size(-1) + template.size(-1) - 1),
                             )
                         ),
                     )
-                    * torch.fft.rfft2(torch.flip(
-                        template, dims=(-1, -2)
-                    ), padded_shape)
+                    * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
                 )
                 .index_select(
                     -2,
@@ -185,8 +181,10 @@ got {statistic}")
             case "naive":
                 return crossCorrNaive
             case _:
-                raise ValueError(f"Method must be 'fft' or 'spatial', 'naive',\
-got {method}")
+                raise ValueError(
+                    f"Method must be 'fft' or 'spatial', 'naive',\
+got {method}"
+                )
 
     def forward(self, im, template):
         """
@@ -209,11 +207,7 @@ got {method}")
             (padHb := (padHt + 1 - template.size(-2) % 2)),
         ]
 
-        cache = torch.nn.functional.pad(
-            im,
-            [padWl + 1, padWr, padHt + 1, padHb],
-            mode="reflect"
-        )
+        cache = torch.nn.functional.pad(im, [padWl + 1, padWr, padHt + 1, padHb], mode="reflect")
         cache[:, :, 0, :] = 0
         cache[:, :, :, 0] = 0
 
@@ -230,29 +224,14 @@ got {method}")
         ) / (template.size(-2) * template.size(-1))
 
         templateCentered = template - template.mean(dim=(-2, -1), keepdim=True)
-        numerator = self.crossCorrelation(
-            imCentered,
-            templateCentered,
-            *padding
-        )
+        numerator = self.crossCorrelation(imCentered, templateCentered, *padding)
 
         if self.normalize:
             cache[:, :, 1:, 1:] = 0
             cache[:, :, iiSlice, jjSlice] = imCentered.pow(2)
-            energy = self._computeRectangleSum(
-                cache.cumsum(-1).cumsum(-2),
-                ii,
-                jj,
-                *padding
-            )
+            energy = self._computeRectangleSum(cache.cumsum(-1).cumsum(-2), ii, jj, *padding)
             return numerator / (
-                (
-                    energy.sqrt() * (
-                        templateCentered.norm(
-                            p=2, dim=(-2, -1), keepdim=True
-                        )
-                    )
-                ).clamp(
+                (energy.sqrt() * (templateCentered.norm(p=2, dim=(-2, -1), keepdim=True))).clamp(
                     min=1e-10
                 )
             )
