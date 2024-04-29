@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal
+
 import torch
 import torch.nn.functional as F
 
@@ -38,7 +39,9 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
     """
 
     def __init__(
-        self, statistic: Literal["corr", "ncorr"], method: Literal["fft", "spatial", "naive"]
+        self,
+        statistic: Literal["corr", "ncorr"],
+        method: Literal["fft", "spatial", "naive"],
     ):
         super().__init__()
         self.crossCorrelation = self._chooseMethod(method)
@@ -123,28 +126,26 @@ got {statistic}"
             # template is zero mean, check page 2 right side :
             # Lewis, J.P.. (1994). Fast Template Matching. Vis. Interface. 95.
             # http://scribblethink.org/Work/nvisionInterface/vi95_lewis.pdf
-            return (
-                torch.fft.irfft2(
-                    torch.fft.rfft2(
-                        imCentered,
-                        s=(
-                            padded_shape := (
-                                self._nextFastLen(imCentered.size(-2) + template.size(-2) - 1),
-                                self._nextFastLen(imCentered.size(-1) + template.size(-1) - 1),
-                            )
-                        ),
-                    )
-                    * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+            return torch.fft.irfft2(
+                torch.fft.rfft2(
+                    imCentered,
+                    s=(
+                        padded_shape := (
+                            self._nextFastLen(
+                                imCentered.size(-2) + template.size(-2) - 1
+                            ),
+                            self._nextFastLen(
+                                imCentered.size(-1) + template.size(-1) - 1
+                            ),
+                        )
+                    ),
                 )
-                .index_select(
-                    -2,
-                    torch.arange(padHt, padHt + imCentered.size(-2), device=imCentered.device),
-                )
-                .index_select(
-                    -1,
-                    torch.arange(padWl, padWl + imCentered.size(-1), device=imCentered.device),
-                )
-            )
+                * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+            )[
+                ...,
+                padHt : padHt + imCentered.size(-2),
+                padWl : padWl + imCentered.size(-1),
+            ]
 
         # NAIVE METHOD
         def crossCorrNaive(imCentered, template, *padding):
@@ -207,7 +208,9 @@ got {method}"
             (padHb := (padHt + 1 - template.size(-2) % 2)),
         ]
 
-        cache = torch.nn.functional.pad(im, [padWl + 1, padWr, padHt + 1, padHb], mode="reflect")
+        cache = torch.nn.functional.pad(
+            im, [padWl + 1, padWr, padHt + 1, padHb], mode="reflect"
+        )
         cache[:, :, 0, :] = 0
         cache[:, :, :, 0] = 0
 
@@ -229,11 +232,14 @@ got {method}"
         if self.normalize:
             cache[:, :, 1:, 1:] = 0
             cache[:, :, iiSlice, jjSlice] = imCentered.pow(2)
-            energy = self._computeRectangleSum(cache.cumsum(-1).cumsum(-2), ii, jj, *padding)
+            energy = self._computeRectangleSum(
+                cache.cumsum(-1).cumsum(-2), ii, jj, *padding
+            )
             return numerator / (
-                (energy.sqrt() * (templateCentered.norm(p=2, dim=(-2, -1), keepdim=True))).clamp(
-                    min=1e-10
-                )
+                (
+                    energy.sqrt()
+                    * (templateCentered.norm(p=2, dim=(-2, -1), keepdim=True))
+                ).clamp(min=1e-10)
             )
 
         return numerator
