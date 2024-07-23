@@ -235,11 +235,11 @@ got {method}"
             energy = self._computeRectangleSum(
                 cache.cumsum(-1).cumsum(-2), ii, jj, *padding
             )
-            return numerator / (
-                (
-                    energy.sqrt()
-                    * (templateCentered.norm(p=2, dim=(-2, -1), keepdim=True))
-                ).clamp(min=1e-10)
+
+            denom = energy.sqrt() * (
+                templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
             )
+
+            return torch.where(denom.abs() < 1e-6, 0, numerator / denom)
 
         return numerator
