@@ -117,75 +117,70 @@ got {statistic}"
         Returns:
             function: The chosen method for computing the cross-correlation.
         """
-
-        # FFT METHOD
-        def crossCorrFFT(imCentered, template, padWl, padWr, padHt, padHb):
-            # We flip the template because we want to cross correlate
-            # (and not convolve) the image with the template.
-            # Note that, we don't need the image mean value to be zero if the
-            # template is zero mean, check page 2 right side :
-            # Lewis, J.P.. (1994). Fast Template Matching. Vis. Interface. 95.
-            # http://scribblethink.org/Work/nvisionInterface/vi95_lewis.pdf
-            return torch.fft.irfft2(
-                torch.fft.rfft2(
-                    imCentered,
-                    s=(
-                        padded_shape := (
-                            self._nextFastLen(
-                                imCentered.size(-2) + template.size(-2) - 1
-                            ),
-                            self._nextFastLen(
-                                imCentered.size(-1) + template.size(-1) - 1
-                            ),
-                        )
-                    ),
-                )
-                * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
-            )[
-                ...,
-                padHt : padHt + imCentered.size(-2),
-                padWl : padWl + imCentered.size(-1),
-            ]
-
-        # NAIVE METHOD
-        def crossCorrNaive(imCentered, template, *padding):
-            return (
-                torch.nn.functional.pad(
-                    imCentered,
-                    padding,
-                )
-                .unfold(2, template.size(-2), 1)
-                .unfold(3, template.size(-1), 1)
-                .flatten(-2, -1)
-                * template.flatten(-2, -1).unsqueeze(2).unsqueeze(2)
-            ).sum(dim=-1)
-
-        # SPATIAL METHOD
-        def crossCorrSpatial(imCentered, template, *_):
-            # Conv2D is a cross-correlation in PyTorch, not real convolutions
-            return (
-                F.conv2d(
-                    imCentered.flatten(0, 1).unsqueeze(0),
-                    template.flatten(0, 1).unsqueeze(1),
-                    padding="same",
-                    groups=imCentered.size(1) * imCentered.size(0),
-                )
-                .unflatten(1, imCentered.shape[:2])
-                .squeeze(0)
-            )
-
         match method:
             case "fft":
-                return crossCorrFFT
+                return self.crossCorrFFT
             case "spatial":
-                return crossCorrSpatial
+                return self.crossCorrSpatial
             case "naive":
-                return crossCorrNaive
+                return self.crossCorrNaive
             case _:
                 raise ValueError(
                     f"Method must be 'fft' or 'spatial', 'naive',\
-got {method}"
+        got {method}"
                 )
+
+    # FFT METHOD
+    def crossCorrFFT(self, imCentered, template, padWl, padWr, padHt, padHb):
+        # We flip the template because we want to cross correlate
+        # (and not convolve) the image with the template.
+        # Note that, we don't need the image mean value to be zero if the
+        # template is zero mean, check page 2 right side :
+        # Lewis, J.P.. (1994). Fast Template Matching. Vis. Interface. 95.
+        # http://scribblethink.org/Work/nvisionInterface/vi95_lewis.pdf
+        return torch.fft.irfft2(
+            torch.fft.rfft2(
+                imCentered,
+                s=(
+                    padded_shape := (
+                        self._nextFastLen(imCentered.size(-2) + template.size(-2) - 1),
+                        self._nextFastLen(imCentered.size(-1) + template.size(-1) - 1),
+                    )
+                ),
+            )
+            * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+        )[
+            ...,
+            padHt : padHt + imCentered.size(-2),
+            padWl : padWl + imCentered.size(-1),
+        ]
+
+    # NAIVE METHOD
+    def crossCorrNaive(self, imCentered, template, *padding):
+        return (
+            torch.nn.functional.pad(
+                imCentered,
+                padding,
+            )
+            .unfold(2, template.size(-2), 1)
+            .unfold(3, template.size(-1), 1)
+            .flatten(-2, -1)
+            * template.flatten(-2, -1).unsqueeze(2).unsqueeze(2)
+        ).sum(dim=-1)
+
+    # SPATIAL METHOD
+    def crossCorrSpatial(self, imCentered, template, *_):
+        # Conv2D is a cross-correlation in PyTorch, not real convolutions
+        return (
+            F.conv2d(
+                imCentered.flatten(0, 1).unsqueeze(0),
+                template.flatten(0, 1).unsqueeze(1),
+                padding="same",
+                groups=imCentered.size(1) * imCentered.size(0),
+            )
+            .unflatten(1, imCentered.shape[:2])
+            .squeeze(0)
+        )
 
     def forward(self, im, template):
         """
