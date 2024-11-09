@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Literal
 
 import torch
@@ -26,8 +25,6 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         ValueError: If the method is not "fft", "spatial", or "naive".
 
     Methods:
-        findArgmax(x): Finds the indices of the maximum values along the last
-            dimension of the input tensor.
         forward(im, template): Performs the forward pass of the module.
 
     Examples:
@@ -60,42 +57,6 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
 got {statistic}"
                 )
 
-    @staticmethod
-    def findArgmax(x):
-        """
-        Finds the indices of the maximum values along the last dimension of
-        the input tensor.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-
-        Returns:
-            torch.Tensor: The indices of the maximum values.
-        """
-        aMax = x.flatten(-2, -1).argmax(dim=-1)
-        return torch.stack([aMax // x.size(-1), aMax % x.size(-1)])
-
-    @lru_cache(maxsize=2)
-    def _nextFastLen(self, size):
-        """
-        Computes the next fast length for FFT-based method.
-
-        Args:
-            size (int): The current size.
-
-        Returns:
-            int: The next fast length.
-        """
-        next_size = size
-        while True:
-            remaining = next_size
-            for n in (2, 3, 5):
-                while (euclDiv := divmod(remaining, n))[1] == 0:
-                    remaining = euclDiv[0]
-            if remaining == 1:
-                return next_size
-            next_size += 1
-
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
         Computes the sum of values in a rectangular region of the input tensor.
@@ -119,11 +80,11 @@ got {statistic}"
         """
         match method:
             case "fft":
-                return self.crossCorrFFT
+                return self._crossCorrFFT
             case "spatial":
-                return self.crossCorrSpatial
+                return self._crossCorrSpatial
             case "naive":
-                return self.crossCorrNaive
+                return self._crossCorrNaive
             case _:
                 raise ValueError(
                     f"Method must be 'fft' or 'spatial', 'naive',\
@@ -131,7 +92,7 @@ got {statistic}"
                 )
 
     # FFT METHOD
-    def crossCorrFFT(self, imCentered, template, *_):
+    def _crossCorrFFT(self, imCentered, template, *_):
         # We flip the template because we want to cross correlate
         # (and not convolve) the image with the template.
         # Note that, we don't need the image mean value to be zero if the
@@ -164,7 +125,7 @@ got {statistic}"
         ]
 
     # NAIVE METHOD
-    def crossCorrNaive(self, imCentered, template, *padding):
+    def _crossCorrNaive(self, imCentered, template, *padding):
         return (
             torch.nn.functional.pad(
                 imCentered,
@@ -177,7 +138,7 @@ got {statistic}"
         ).sum(dim=-1)
 
     # SPATIAL METHOD
-    def crossCorrSpatial(self, imCentered, template, *_):
+    def _crossCorrSpatial(self, imCentered, template, *_):
         # Conv2D is a cross-correlation in PyTorch, not real convolutions
         return (
             F.conv2d(
