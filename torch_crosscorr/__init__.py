@@ -131,7 +131,7 @@ got {statistic}"
                 )
 
     # FFT METHOD
-    def crossCorrFFT(self, imCentered, template, padWl, padWr, padHt, padHb):
+    def crossCorrFFT(self, imCentered, template, *_):
         # We flip the template because we want to cross correlate
         # (and not convolve) the image with the template.
         # Note that, we don't need the image mean value to be zero if the
@@ -143,16 +143,24 @@ got {statistic}"
                 imCentered,
                 s=(
                     padded_shape := (
-                        self._nextFastLen(imCentered.size(-2) + template.size(-2) - 1),
-                        self._nextFastLen(imCentered.size(-1) + template.size(-1) - 1),
+                        (
+                            imCentered.size(-2)
+                            + template.size(-2)
+                            - template.size(-2) % 2
+                        ),  
+                        (
+                            imCentered.size(-1)
+                            + template.size(-1)
+                            - template.size(-1) % 2
+                        ),
                     )
                 ),
             )
-            * torch.fft.rfft2(torch.flip(template, dims=(-1, -2)), padded_shape)
+            * torch.fft.rfft2(torch.flip(template, dims=(-2, -1)), padded_shape)
         )[
             ...,
-            padHt : padHt + imCentered.size(-2),
-            padWl : padWl + imCentered.size(-1),
+            (hH := template.size(-2) // 2) : -(hH),
+            (hW := template.size(-1) // 2) : -(hW),
         ]
 
     # NAIVE METHOD
@@ -162,8 +170,8 @@ got {statistic}"
                 imCentered,
                 padding,
             )
-            .unfold(2, template.size(-2), 1)
-            .unfold(3, template.size(-1), 1)
+            .unfold(-2, template.size(-2), 1)
+            .unfold(-2, template.size(-1), 1)
             .flatten(-2, -1)
             * template.flatten(-2, -1).unsqueeze(2).unsqueeze(2)
         ).sum(dim=-1)
