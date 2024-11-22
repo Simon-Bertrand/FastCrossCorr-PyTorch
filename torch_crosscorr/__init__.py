@@ -214,7 +214,7 @@ got {statistic}"
             templateNorm = templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
             denom: torch.Tensor = energySqr * templateNorm
             return torch.where(
-                denom >= self.EPS_NORM_NULL_THRESHOLD_DENOM & ~denom.isnan(),
+                (denom >= self.EPS_NORM_NULL_THRESHOLD_DENOM) & ~denom.isnan(),
                 numerator / denom,
                 0,
             )
