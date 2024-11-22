@@ -208,9 +208,7 @@ got {statistic}"
             energy = self._computeRectangleSum(
                 cache.cumsum(-1).cumsum(-2), ii, jj, *padding
             )
-            energySqr = (
-                energy.clamp(min=0).where(energy > self.EPS_NORM_ENERGY_SQRT, 0)
-            ).sqrt()
+            energySqr = (energy.where(energy > self.EPS_NORM_ENERGY_SQRT, 0)).sqrt()
             templateNorm = templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
             denom: torch.Tensor = energySqr * templateNorm
             return torch.where(
