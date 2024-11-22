@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 
 class FastNormalizedCrossCorrelation(torch.nn.Module):
+    EPS_NORM_ENERGY_SQRT = 1e-8
+    EPS_NORM_NULL_THRESHOLD_DENOM = 1e-8
     """
     This class represents a module for performing fast normalized
     cross-correlation.
@@ -39,6 +41,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         self,
         statistic: Literal["corr", "ncorr"],
         method: Literal["fft", "spatial", "naive"],
+        dtype=None,
     ):
         super().__init__()
         self.crossCorrelation = self._chooseMethod(method)
@@ -56,6 +59,8 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
                     f"Statistic must be 'corr' or 'ncorr',\
 got {statistic}"
                 )
+
+        self.output_dtype = dtype
 
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
@@ -108,7 +113,7 @@ got {statistic}"
                             imCentered.size(-2)
                             + template.size(-2)
                             - template.size(-2) % 2
-                        ),  
+                        ),
                         (
                             imCentered.size(-1)
                             + template.size(-1)
@@ -154,6 +159,9 @@ got {statistic}"
     def forward(self, im, template):
         """
         Performs the forward pass of the module.
+        Note : When using ncorr and integral images to compute the normalization,
+        one should consider the accumulated errors from the cumsum applied twice on float32.
+        To summarize, it is better to use f64 when using ncorr in order to avoid underflow/overflow.
 
         Args:
             im (torch.Tensor): The input image tensor of shape (B, C, H, W).
@@ -173,11 +181,12 @@ got {statistic}"
         ]
 
         cache = torch.nn.functional.pad(
-            im, [padWl + 1, padWr, padHt + 1, padHb], mode="reflect"
+            im.to(dtype=self.output_dtype),
+            [padWl + 1, padWr, padHt + 1, padHb],
+            mode="reflect",
         )
-        cache[:, :, 0, :] = 0
-        cache[:, :, :, 0] = 0
-
+        cache[:, :, 0, :] = 0.0
+        cache[:, :, :, 0] = 0.0
         iiSlice = slice(1 + padHt, 1 + cache.size(-2) - padHb - 1)
         jjSlice = slice(1 + padWl, 1 + cache.size(-1) - padWr - 1)
         ii, jj = torch.meshgrid(
@@ -194,16 +203,20 @@ got {statistic}"
         numerator = self.crossCorrelation(imCentered, templateCentered, *padding)
 
         if self.normalize:
-            cache[:, :, 1:, 1:] = 0
-            cache[:, :, iiSlice, jjSlice] = imCentered.pow(2)
+            cache[:, :, 1:, 1:] = 0.0
+            cache[:, :, iiSlice, jjSlice] = imCentered.to(self.output_dtype).pow(2)
             energy = self._computeRectangleSum(
                 cache.cumsum(-1).cumsum(-2), ii, jj, *padding
             )
-
-            denom = energy.sqrt() * (
-                templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
+            energySqr = (
+                energy.clamp(min=0).where(energy > self.EPS_NORM_ENERGY_SQRT, 0)
+            ).sqrt()
+            templateNorm = templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
+            denom: torch.Tensor = energySqr * templateNorm
+            return torch.where(
+                denom >= self.EPS_NORM_NULL_THRESHOLD_DENOM & ~denom.isnan(),
+                numerator / denom,
+                0,
             )
-
-            return torch.where(denom.abs() < 1e-6, 0, numerator / denom)
 
         return numerator
