@@ -204,7 +204,9 @@ got {statistic}"
 
         if self.normalize:
             cache[:, :, 1:, 1:] = 0.0
-            cache[:, :, iiSlice, jjSlice] = imCentered.to(self.output_dtype).pow(2)
+            cache[:, :, iiSlice, jjSlice] = imCentered.to(dtype=self.output_dtype).pow(
+                2
+            )
             energy = self._computeRectangleSum(
                 cache.cumsum(-1).cumsum(-2), ii, jj, *padding
             )
