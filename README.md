@@ -37,6 +37,9 @@ if !python -c "import torch_crosscor" 2>/dev/null; then
 fi
 ```
 
+    Couldn't find program: 'bash'
+    
+
 # Import library
 
 
@@ -45,17 +48,17 @@ fi
 import torch_crosscorr
 ```
 
-    
-    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m23.2.1[0m[39;49m -> [0m[32;49m24.0[0m
-    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
-
-
 
 ```python
 !pip install -q matplotlib torchvision
 import torch
 import matplotlib.pyplot as plt
 ```
+
+    
+    [notice] A new release of pip is available: 24.2 -> 24.3.1
+    [notice] To update, run: python.exe -m pip install --upgrade pip
+    
 
 
 ```python
@@ -76,7 +79,6 @@ i, j = 65, 40
 sizeX, sizeY = 58, 58
 im = torch.randn(1, 3, 256, 256, dtype=torch.float64)
 imT = im[:, :, i - sizeX // 2 : i + sizeX // 2 + 1, j - sizeY // 2 : j + sizeY // 2 + 1]
-
 ```
 
 ## CHECK EQUALITY BETWEEN METHODS
@@ -90,8 +92,12 @@ for normalize in ["ncorr", "corr"]:
         print(
             "Max L1 distance : ",
             (
-                torch_crosscorr.FastNormalizedCrossCorrelation(normalize, modeTest[0])(im, imT)
-                - torch_crosscorr.FastNormalizedCrossCorrelation(normalize, modeTest[1])(im, imT)
+                torch_crosscorr.FastNormalizedCrossCorrelation(normalize, modeTest[0])(
+                    im, imT
+                )
+                - torch_crosscorr.FastNormalizedCrossCorrelation(
+                    normalize, modeTest[1]
+                )(im, imT)
             )
             .abs()
             .max()
@@ -101,24 +107,24 @@ for normalize in ["ncorr", "corr"]:
 ```
 
     Method : ncorr ('fft', 'spatial')
-    Max L1 distance :  1.3322676295501878e-15
+    Max L1 distance :  1.9984014443252818e-15
     =============================================
     Method : ncorr ('naive', 'spatial')
-    Max L1 distance :  1.3322676295501878e-15
+    Max L1 distance :  1.5543122344752192e-15
     =============================================
     Method : ncorr ('fft', 'naive')
-    Max L1 distance :  2.220446049250313e-16
+    Max L1 distance :  6.661338147750939e-16
     =============================================
     Method : corr ('fft', 'spatial')
-    Max L1 distance :  4.547473508864641e-12
+    Max L1 distance :  6.821210263296962e-12
     =============================================
     Method : corr ('naive', 'spatial')
-    Max L1 distance :  4.547473508864641e-12
+    Max L1 distance :  5.4569682106375694e-12
     =============================================
     Method : corr ('fft', 'naive')
-    Max L1 distance :  9.094947017729282e-13
+    Max L1 distance :  2.2737367544323206e-12
     =============================================
-
+    
 
 ## LOAD IMAGE AND TEST IF RANDOM EXTRACTED CENTER POSITIONS ARE CORRECTLY FOUND
 
@@ -131,25 +137,30 @@ import requests
 ```
 
     
-    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m23.2.1[0m[39;49m -> [0m[32;49m24.0[0m
-    [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
-
+    [notice] A new release of pip is available: 24.2 -> 24.3.1
+    [notice] To update, run: python.exe -m pip install --upgrade pip
+    
 
 Load Mandrill image
 
 
 ```python
-
 import tempfile
 import torchvision
 import torch.nn.functional as F
 
-with tempfile.NamedTemporaryFile() as fp:
-    fp.write(requests.get("https://upload.wikimedia.org/wikipedia/commons/a/ab/Mandrill-k-means.png").content)
-    im = F.interpolate((torchvision.io.read_image(fp.name, torchvision.io.ImageReadMode.RGB).unsqueeze(0)
-    .to(torch.float64)
-    .div(255)), size=(256, 256), mode='bicubic', align_corners=False)
 
+im = F.interpolate(
+    (
+        torchvision.io.read_image("figs/sample.png", torchvision.io.ImageReadMode.RGB)
+        .unsqueeze(0)
+        .to(torch.float64)
+        .div(255)
+    ),
+    size=(256, 256),
+    mode="bicubic",
+    align_corners=False,
+)
 ```
 
 Run multiple tests to check if random crop center is correclty found by the ZNCC.
@@ -157,6 +168,7 @@ Run multiple tests to check if random crop center is correclty found by the ZNCC
 
 ```python
 import random
+
 success = 0
 failed = 0
 pts = []
@@ -167,11 +179,11 @@ for _ in range(500):
     j = random.randint(imW // 2 + 1, im.size(-1) - imW // 2 - 1)
 
     imT = im[:, :, i - imH // 2 : i + imH // 2 + 1, j - imW // 2 : j + imW // 2 + 1]
+    out =  torch_crosscorr.FastNormalizedCrossCorrelation("ncorr", "fft")(im, imT)
+    out_amax = out.sum(-3).flatten(-2).argmax(-1)
     if (
         (
-            torch_crosscorr.FastNormalizedCrossCorrelation.findArgmax(
-                torch_crosscorr.FastNormalizedCrossCorrelation("ncorr", "fft")(im, imT)
-            )
+            torch.Tensor([[[out_amax//out.size(-1)]], [[out_amax%out.size(-1)]]])
             - torch.Tensor([[[i]], [[j]]])
         ).abs()
         < 3
@@ -211,11 +223,10 @@ for pt in pts:
             linewidth=0.5,
         )
     )
-
 ```
 
-    Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers).
-
+    Clipping input data to the valid range for imshow with RGB data ([0..1] for floats or [0..255] for integers). Got range [-0.016961550245098038..1.0345664828431371].
+    
 
 
     
@@ -246,7 +257,7 @@ dict(success=success, failed=failed)
 %timeit torch_crosscorr.FastNormalizedCrossCorrelation("ncorr", "naive")(im, imT)
 ```
 
-    3.23 ms ± 443 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
-    1.43 s ± 10.8 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-    2.37 s ± 22.8 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-
+    5.23 ms ± 86.7 μs per loop (mean ± std. dev. of 7 runs, 100 loops each)
+    971 ms ± 4.79 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+    1.88 s ± 84 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+    

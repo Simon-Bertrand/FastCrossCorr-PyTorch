@@ -5,8 +5,6 @@ import torch.nn.functional as F
 
 
 class FastNormalizedCrossCorrelation(torch.nn.Module):
-    EPS_NORM_ENERGY_SQRT = 1e-8
-    EPS_NORM_NULL_THRESHOLD_DENOM = 1e-8
     """
     This class represents a module for performing fast normalized
     cross-correlation.
@@ -41,6 +39,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         self,
         statistic: Literal["corr", "ncorr"],
         method: Literal["fft", "spatial", "naive"],
+        padding: Literal["same", "valid"] = "same",
         dtype=None,
     ):
         super().__init__()
@@ -60,6 +59,9 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
 got {statistic}"
                 )
 
+        if padding not in ["same", "valid"]:
+            raise ValueError(f"padding={padding} not supported")
+        self.padding = padding
         self.output_dtype = dtype
 
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
@@ -104,6 +106,28 @@ got {statistic}"
         # template is zero mean, check page 2 right side :
         # Lewis, J.P.. (1994). Fast Template Matching. Vis. Interface. 95.
         # http://scribblethink.org/Work/nvisionInterface/vi95_lewis.pdf
+        hH = template.size(-2) // 2
+        hW = template.size(-1) // 2
+        match self.padding:
+            case "same":
+                validSupportI = slice(hH, -(hH) + imCentered.size(-2) % 2)
+                validSupportJ = slice(hW, -(hW) + imCentered.size(-1) % 2)
+            case "valid":
+                validSupportI = slice(
+                    template.size(-2) - 1,
+                    -(template.size(-2))
+                    + template.size(-2) % 2
+                    + imCentered.size(-2) % 2,
+                )
+                validSupportJ = slice(
+                    template.size(-1) - 1,
+                    -(template.size(-1))
+                    + template.size(-1) % 2
+                    + imCentered.size(-1) % 2,
+                )
+            case _:
+                raise ValueError(f"padding={self.padding} not supported")
+
         return torch.fft.irfft2(
             torch.fft.rfft2(
                 imCentered,
@@ -113,28 +137,30 @@ got {statistic}"
                             imCentered.size(-2)
                             + template.size(-2)
                             - template.size(-2) % 2
+                            - imCentered.size(-2) % 2
                         ),
                         (
                             imCentered.size(-1)
                             + template.size(-1)
                             - template.size(-1) % 2
+                            - imCentered.size(-1) % 2
                         ),
                     )
                 ),
             )
             * torch.fft.rfft2(torch.flip(template, dims=(-2, -1)), padded_shape)
-        )[
-            ...,
-            (hH := template.size(-2) // 2) : -(hH),
-            (hW := template.size(-1) // 2) : -(hW),
-        ]
+        )[..., validSupportI, validSupportJ]
 
     # NAIVE METHOD
     def _crossCorrNaive(self, imCentered, template, *padding):
         return (
-            torch.nn.functional.pad(
-                imCentered,
-                padding,
+            (
+                torch.nn.functional.pad(
+                    imCentered,
+                    padding,
+                )
+                if self.padding == "same"
+                else imCentered
             )
             .unfold(-2, template.size(-2), 1)
             .unfold(-2, template.size(-1), 1)
@@ -149,7 +175,7 @@ got {statistic}"
             F.conv2d(
                 imCentered.flatten(0, 1).unsqueeze(0),
                 template.flatten(0, 1).unsqueeze(1),
-                padding="same",
+                padding=self.padding,
                 groups=imCentered.size(1) * imCentered.size(0),
             )
             .unflatten(1, imCentered.shape[:2])
@@ -175,48 +201,62 @@ got {statistic}"
         # Output is a real tensor of shape (B, C, H, W)
         padding = [
             (padWl := (template.size(-1) - 1) // 2),
-            (padWr := (padWl + 1 - template.size(-1) % 2)),
+            (
+                padWr := (padWl + 1 - template.size(-1) % 2)
+            ),  # The trick here "+ 1 - template.size(-1) % 2" is to add 1 when the template size is even
             (padHt := ((template.size(-2) - 1) // 2)),
             (padHb := (padHt + 1 - template.size(-2) % 2)),
         ]
-
+        im = im.to(dtype=self.output_dtype)
+        # Cache used to compute the integral image, we need adding 1 row and 1 column of zeros at the top left
+        # The cache is used a second time for "ncorr" to compute the energy of the image
+        # It avoids double allocation
         cache = torch.nn.functional.pad(
-            im.to(dtype=self.output_dtype),
+            im,
             [padWl + 1, padWr, padHt + 1, padHb],
-            mode="reflect",
+            mode="constant",
         )
         cache[:, :, 0, :] = 0.0
         cache[:, :, :, 0] = 0.0
-        iiSlice = slice(1 + padHt, 1 + cache.size(-2) - padHb - 1)
-        jjSlice = slice(1 + padWl, 1 + cache.size(-1) - padWr - 1)
+        iiSlice = slice(1 + padHt, cache.size(-2) - padHb)
+        jjSlice = slice(1 + padWl, cache.size(-1) - padWr)
         ii, jj = torch.meshgrid(
             torch.arange(iiSlice.start, iiSlice.stop, device=im.device),
             torch.arange(jjSlice.start, jjSlice.stop, device=im.device),
             indexing="ij",
-        )
-
+        )  # Get the cache valid support indices
         imCentered = im - self._computeRectangleSum(
             cache.cumsum(-1).cumsum(-2), ii, jj, *padding
-        ) / (template.size(-2) * template.size(-1))
-
-        templateCentered = template - template.mean(dim=(-2, -1), keepdim=True)
-        numerator = self.crossCorrelation(imCentered, templateCentered, *padding)
-
+        ) / (
+            template.size(-2) * template.size(-1)
+        )  # Center the image using integral image
+        templateCentered = template - template.mean(
+            dim=(-2, -1), keepdim=True
+        )  # Center the template using its mean
+        numerator = self.crossCorrelation(
+            imCentered, templateCentered, *padding
+        )  # Compute the cross-correlation
         if self.normalize:
-            cache[:, :, 1:, 1:] = 0.0
+            cache[:, :, 1:, 1:] = 0.0  # Reset cache values
             cache[:, :, iiSlice, jjSlice] = imCentered.to(dtype=self.output_dtype).pow(
                 2
-            )
-            energy = self._computeRectangleSum(
-                cache.cumsum(-1).cumsum(-2), ii, jj, *padding
-            )
-            energySqr = (energy.where(energy > self.EPS_NORM_ENERGY_SQRT, 0)).sqrt()
-            templateNorm = templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
-            denom: torch.Tensor = energySqr * templateNorm
+            )  # Insert image.pow(2) in cache
+            energySqr = (
+                self._computeRectangleSum(cache.cumsum(-1).cumsum(-2), ii, jj, *padding)
+                .clamp(min=0)
+                .sqrt()
+            )  # Compute energy using integral image of image.pow(2)
+            denom: torch.Tensor = energySqr * templateCentered.norm(
+                p=2, dim=(-2, -1), keepdim=True
+            )  # Compute the denominator with the template L2 norm
+            if self.padding == "valid":
+                denom = denom[
+                    ...,
+                    padHt : padHt + imCentered.size(-2) - template.size(-2) + 1,
+                    padWl : padWl + imCentered.size(-1) - template.size(-1) + 1,
+                ]  # Crop the denominator if padding is valid
             return torch.where(
-                (denom >= self.EPS_NORM_NULL_THRESHOLD_DENOM) & ~denom.isnan(),
-                numerator / denom,
-                0,
-            )
-
+                denom.abs() < 1e-7, 0, numerator / denom
+            )  # Set 0 if denominator is too small (low energy or/and low norm) else compute the normalized cross-correlation
         return numerator
+
