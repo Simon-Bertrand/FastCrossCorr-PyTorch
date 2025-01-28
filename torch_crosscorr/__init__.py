@@ -225,6 +225,7 @@ got {statistic}"
             torch.arange(jjSlice.start, jjSlice.stop, device=im.device),
             indexing="ij",
         )  # Get the cache valid support indices
+
         imCentered = im - self._computeRectangleSum(
             cache.cumsum(-1).cumsum(-2), ii, jj, *padding
         ) / (
@@ -233,6 +234,7 @@ got {statistic}"
         templateCentered = template - template.mean(
             dim=(-2, -1), keepdim=True
         )  # Center the template using its mean
+
         numerator = self.crossCorrelation(
             imCentered, templateCentered, *padding
         )  # Compute the cross-correlation
@@ -241,6 +243,7 @@ got {statistic}"
             cache[:, :, iiSlice, jjSlice] = imCentered.to(dtype=self.output_dtype).pow(
                 2
             )  # Insert image.pow(2) in cache
+
             energySqr = (
                 self._computeRectangleSum(cache.cumsum(-1).cumsum(-2), ii, jj, *padding)
                 .clamp(min=0)
@@ -259,4 +262,3 @@ got {statistic}"
                 denom.abs() < 1e-7, 0, numerator / denom
             )  # Set 0 if denominator is too small (low energy or/and low norm) else compute the normalized cross-correlation
         return numerator
-
