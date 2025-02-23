@@ -40,6 +40,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         statistic: Literal["corr", "ncorr"],
         method: Literal["fft", "spatial", "naive"],
         padding: Literal["same", "valid"] = "same",
+        center=True,
         dtype=None,
     ):
         super().__init__()
@@ -63,6 +64,7 @@ got {statistic}"
             raise ValueError(f"padding={padding} not supported")
         self.padding = padding
         self.output_dtype = dtype
+        self.center = True
 
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
@@ -225,20 +227,24 @@ got {statistic}"
             torch.arange(jjSlice.start, jjSlice.stop, device=im.device),
             indexing="ij",
         )  # Get the cache valid support indices
+        if self.center:
+            imCentered = im - self._computeRectangleSum(
+                cache.cumsum(-1).cumsum(-2), ii, jj, *padding
+            ) / (
+                template.size(-2) * template.size(-1)
+            )  # Center the image using integral image
+            templateCentered = template - template.mean(
+                dim=(-2, -1), keepdim=True
+            )  # Center the template using its mean
+        else:
+            imCentered = im
+            templateCentered = template
 
-        imCentered = im - self._computeRectangleSum(
-            cache.cumsum(-1).cumsum(-2), ii, jj, *padding
-        ) / (
-            template.size(-2) * template.size(-1)
-        )  # Center the image using integral image
-        templateCentered = template - template.mean(
-            dim=(-2, -1), keepdim=True
-        )  # Center the template using its mean
-
-        numerator = self.crossCorrelation(
-            imCentered, templateCentered, *padding
-        )  # Compute the cross-correlation
-        if self.normalize:
+        if not self.normalize:
+            return self.crossCorrelation(
+                imCentered, templateCentered, *padding
+            )  # Compute the cross-correlation
+        else:
             cache[:, :, 1:, 1:] = 0.0  # Reset cache values
             cache[:, :, iiSlice, jjSlice] = imCentered.to(dtype=self.output_dtype).pow(
                 2
@@ -258,7 +264,12 @@ got {statistic}"
                     padHt : padHt + imCentered.size(-2) - template.size(-2) + 1,
                     padWl : padWl + imCentered.size(-1) - template.size(-1) + 1,
                 ]  # Crop the denominator if padding is valid
-            return torch.where(
-                denom.abs() < 1e-7, 0, numerator / denom
-            )  # Set 0 if denominator is too small (low energy or/and low norm) else compute the normalized cross-correlation
+
+            numerator = self.crossCorrelation(
+                imCentered / energySqr,
+                templateCentered
+                / templateCentered.norm(p=2, dim=(-2, -1), keepdim=True),
+                *padding,
+            )
+            return numerator
         return numerator
