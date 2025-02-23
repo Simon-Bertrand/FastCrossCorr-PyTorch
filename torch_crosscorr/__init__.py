@@ -64,7 +64,9 @@ got {statistic}"
             raise ValueError(f"padding={padding} not supported")
         self.padding = padding
         self.output_dtype = dtype
-        self.center = True
+        self.center = center
+        if self.normalize:
+            assert self.center, "Normalization requires centering"
 
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
@@ -227,7 +229,9 @@ got {statistic}"
             torch.arange(jjSlice.start, jjSlice.stop, device=im.device),
             indexing="ij",
         )  # Get the cache valid support indices
-        if self.center:
+        imCentered = im
+        templateCentered = template
+        if self.center or self.normalize:
             imCentered = im - self._computeRectangleSum(
                 cache.cumsum(-1).cumsum(-2), ii, jj, *padding
             ) / (
@@ -236,9 +240,6 @@ got {statistic}"
             templateCentered = template - template.mean(
                 dim=(-2, -1), keepdim=True
             )  # Center the template using its mean
-        else:
-            imCentered = im
-            templateCentered = template
 
         if not self.normalize:
             return self.crossCorrelation(
@@ -255,16 +256,6 @@ got {statistic}"
                 .clamp(min=0)
                 .sqrt()
             )  # Compute energy using integral image of image.pow(2)
-            denom: torch.Tensor = energySqr * templateCentered.norm(
-                p=2, dim=(-2, -1), keepdim=True
-            )  # Compute the denominator with the template L2 norm
-            if self.padding == "valid":
-                denom = denom[
-                    ...,
-                    padHt : padHt + imCentered.size(-2) - template.size(-2) + 1,
-                    padWl : padWl + imCentered.size(-1) - template.size(-1) + 1,
-                ]  # Crop the denominator if padding is valid
-
             numerator = self.crossCorrelation(
                 imCentered / energySqr,
                 templateCentered
@@ -272,4 +263,3 @@ got {statistic}"
                 *padding,
             )
             return numerator
-        return numerator
