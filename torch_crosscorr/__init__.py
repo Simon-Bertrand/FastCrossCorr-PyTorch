@@ -68,6 +68,9 @@ got {statistic}"
         if self.normalize:
             assert self.center, "Normalization requires centering"
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(normalize={self.normalize})"
+
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
         Computes the sum of values in a rectangular region of the input tensor.
