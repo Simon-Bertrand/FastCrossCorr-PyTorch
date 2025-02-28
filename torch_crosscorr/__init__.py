@@ -40,6 +40,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         statistic: Literal["corr", "ncorr"],
         method: Literal["fft", "spatial", "naive"],
         padding: Literal["same", "valid"] = "same",
+        tempFactor=None,
         center=True,
         dtype=None,
     ):
@@ -67,6 +68,8 @@ got {statistic}"
         self.center = center
         if self.normalize:
             assert self.center, "Normalization requires centering"
+
+        self.tempFactor = tempFactor
 
     def __repr__(self):
         return f"{self.__class__.__name__}(normalize={self.normalize})"
@@ -265,4 +268,4 @@ got {statistic}"
                 / templateCentered.norm(p=2, dim=(-2, -1), keepdim=True),
                 *padding,
             )
-            return numerator
+            return numerator / (self.tempFactor) if self.tempFactor else numerator
