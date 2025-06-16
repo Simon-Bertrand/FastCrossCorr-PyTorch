@@ -42,6 +42,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         padding: Literal["same", "valid"] = "same",
         tempFactor=None,
         center=True,
+        tempFactor=None,
         dtype=None,
     ):
         super().__init__()
@@ -68,6 +69,7 @@ got {statistic}"
         self.center = center
         if self.normalize:
             assert self.center, "Normalization requires centering"
+        self.tempFactor = tempFactor
 
         self.tempFactor = tempFactor
 
@@ -259,13 +261,16 @@ got {statistic}"
 
             energySqr = (
                 self._computeRectangleSum(cache.cumsum(-1).cumsum(-2), ii, jj, *padding)
-                .clamp(min=0)
+                .clamp(min=1e-8)
                 .sqrt()
             )  # Compute energy using integral image of image.pow(2)
+
+            normTemplate = templateCentered.norm(p=2, dim=(-2, -1), keepdim=True)
             numerator = self.crossCorrelation(
                 imCentered / energySqr,
-                templateCentered
-                / templateCentered.norm(p=2, dim=(-2, -1), keepdim=True),
+                templateCentered / normTemplate.clamp(min=1e-4),
                 *padding,
             )
-            return numerator / (self.tempFactor) if self.tempFactor else numerator
+            if self.tempFactor is not None:
+                return numerator / self.tempFactor
+            return numerator
