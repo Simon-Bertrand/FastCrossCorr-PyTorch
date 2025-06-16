@@ -40,6 +40,7 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         statistic: Literal["corr", "ncorr"],
         method: Literal["fft", "spatial", "naive"],
         padding: Literal["same", "valid"] = "same",
+        tempFactor=None,
         center=True,
         tempFactor=None,
         dtype=None,
@@ -69,6 +70,11 @@ got {statistic}"
         if self.normalize:
             assert self.center, "Normalization requires centering"
         self.tempFactor = tempFactor
+
+        self.tempFactor = tempFactor
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(normalize={self.normalize})"
 
     def _computeRectangleSum(self, intIm, ii, jj, padWl, padWr, padHt, padHb):
         """
