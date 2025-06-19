@@ -42,7 +42,6 @@ class FastNormalizedCrossCorrelation(torch.nn.Module):
         padding: Literal["same", "valid"] = "same",
         tempFactor=None,
         center=True,
-        tempFactor=None,
         dtype=None,
     ):
         super().__init__()
@@ -127,15 +126,11 @@ got {statistic}"
             case "valid":
                 validSupportI = slice(
                     template.size(-2) - 1,
-                    -(template.size(-2))
-                    + template.size(-2) % 2
-                    + imCentered.size(-2) % 2,
+                    -(template.size(-2)) + template.size(-2) % 2 + imCentered.size(-2) % 2,
                 )
                 validSupportJ = slice(
                     template.size(-1) - 1,
-                    -(template.size(-1))
-                    + template.size(-1) % 2
-                    + imCentered.size(-1) % 2,
+                    -(template.size(-1)) + template.size(-1) % 2 + imCentered.size(-1) % 2,
                 )
             case _:
                 raise ValueError(f"padding={self.padding} not supported")
